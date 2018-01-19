@@ -1,0 +1,13 @@
+complete -F _command lx
+_command(){ 
+COMPREPLY=() 
+check="${COMP_WORDS[COMP_CWORD]}" 
+if [[ ${COMP_CWORD} == 1 ]];then 
+  COMPREPLY=($(compgen -W "list start stop create destroy console attach memory swap autoon autooff ai di addif delif edit" -- $check))
+  return 0 
+fi
+if [[ ${COMP_WORDS[1]} != "list" && ${COMP_CWORD} == 2 ]];then
+  COMPREPLY=($(compgen -W "$(find /var/lib/lxc/* -maxdepth 0 -type d -printf ' %f ')" -- $check))
+  return 0
+fi
+}
