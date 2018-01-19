@@ -1,5 +1,6 @@
-# lxc
+# lx - утилита для более удобного управления контейнером lxc ()
 
+`
 usage:
 /usr/local/bin/lx command [container-name] [parametr] 
 
@@ -24,4 +25,4 @@ parametr:
 -s  --swap              - указать свап
 -c  --cpu               - указать кол-во процессоров
 -d  --disk              - указать объем диска
-
+`
