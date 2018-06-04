@@ -1,9 +1,9 @@
 #!/usr/bin/env perl
-#v0.3
 
 use 5.016;
 use warnings;
 use Getopt::Long;
+use constant VERSION => 0.3;
 
 # parametrs
 ############################################################################################################
@@ -464,9 +464,11 @@ sub set_con {
 # manual
 ############################################################################################################
 sub usage {
-  print(qq(
-  usage:
-  $0 command [container-name] [parametr] 
+  printf(qq(
+  Version: %s
+  
+  usage:  
+  %s command [container-name] [parametr] 
   command:
     list     - список контейнеров
     template - список темплайтов
@@ -501,9 +503,8 @@ sub usage {
         -c  --cpu               - указать кол-во процессоров
         -d  --disk              - указать объем диска
 
-  Основные настройки прописываються в файле: $main_conf_file .
-  
-  ));
+  Основные настройки прописываються в файле: %s.
+  \n),VERSION,$0,$main_conf_file);
   exit 0;
 }
 

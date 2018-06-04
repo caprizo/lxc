@@ -1,22 +1,29 @@
 complete -F _command lx
 _command(){ 
+
 COMPREPLY=() 
+
 check="${COMP_WORDS[COMP_CWORD]}" 
+
 if [[ ${COMP_CWORD} == 1 ]];then 
-  COMPREPLY=($(compgen -W "list template info create destroy start stop freeze unfreeze console attach exec set " -- $check))
+  COMPREPLY=($(compgen -W 'list template info create destroy start stop freeze unfreeze console attach exec set' -- $check))
   return 0 
 fi
-if [[ ${COMP_WORDS[1]} != "list" && ${COMP_CWORD} == 2 ]];then
-  COMPREPLY=($(compgen -W "$(find /var/lib/lxc/* -maxdepth 0 -type d -printf ' %f ')" -- $check))
+
+if [[ ${COMP_WORDS[1]} != 'list' && ${COMP_WORDS[1]} != 'create' && ${COMP_CWORD} == 2 ]];then
+  COMPREPLY=($(compgen -W "$(find /var/lib/lxc/* -maxdepth 0 -type d -printf '%f ')" -- $check))
   return 0
 fi
-if [[ ${COMP_WORDS[1]} == "set" && ${COMP_CWORD} == 3 ]];then
-  COMPREPLY=($(compgen -W "--autostart --priv --addif --delif --memory --swap --cpu --disk" -- $check))
+
+if [[ ${COMP_WORDS[1]} != 'set' && ${COMP_CWORD} -ge 3 ]];then
+  COMPREPLY=($(compgen -W '--autostart --priv --addif --delif --memory --swap --cpu --disk' -- $check))
   return 0
 fi
-if [[ ${COMP_WORDS[1]} == "create" && ${COMP_CWORD} == 3 ]];then
-  COMPREPLY=($(compgen -W "--autostart --template --priv --addif --memory --swap --cpu --disk" -- $check))
+
+if [[ ${COMP_WORDS[1]} != 'create' && ${COMP_CWORD} -ge 3 ]];then
+  COMPREPLY=($(compgen -W '--autostart --template --priv --addif --memory --swap --cpu --disk' -- $check))
   return 0
 fi
 
 }
+
