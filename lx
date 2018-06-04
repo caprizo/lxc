@@ -1,241 +1,376 @@
 #!/usr/bin/env perl
+#v0.3
 
-use strict;
+use 5.016;
 use warnings;
 use Getopt::Long;
 
 # parametrs
 ############################################################################################################
-my $lxc_root_dir	= '/lxc';
-my $lxc_data_dir	= '/var/lib/lxc';
-my $lxc_main_conf	= $lxc_data_dir;
-my $lxc_conf_dir	= $lxc_root_dir . '/conf';
-my $lxc_log_dir 	= $lxc_root_dir . '/log';
-my $lxc_temp_dir	= $lxc_root_dir . '/template';
-my $lxc_par 		= "--lxcpath=$lxc_data_dir";
-my $template		= '/lxc/template/deb9.tgz';
 
-my $lvm_vg              = 'lxc';
+my $lxc_root_dir     = '/lxc';
+my $lxc_data_dir     = '/var/lib/lxc';
+my $lxc_main_conf    = $lxc_data_dir;
+my $lxc_conf_dir     = $lxc_root_dir . '/conf';
+my $lxc_log_dir      = $lxc_root_dir . '/log';
+my $lxc_temp_dir     = $lxc_root_dir . '/template';
+my $main_conf_file   = $lxc_conf_dir . '/lx.conf';
+my $lxc_par          = '--lxcpath='  . $lxc_data_dir;
+my $unprivilage_id   = 100000;
+
+my $default_template = 'deb9.tgz';
+my $lvm_vg           = 'lxc';
+
+
+
+if(open(my $fhr_main_conf , '<', $main_conf_file)){
+  while(<$fhr_main_conf>){if(!/^\s*#/){
+    $default_template=$1 if /default_template\s*=\s*([^#\s]*)/;
+    $lvm_vg=$1 if /lvm_vg\s*=\s*([^#\s]*)/;
+  }}close($fhr_main_conf);
+}else{
+  open(my $fhw_main_conf, '>',$main_conf_file);
+  $fhw_main_conf->print("lvm_vg = $lvm_vg\ndefault_template = $default_template\n ");
+  close($fhw_main_conf);
+}
 
 my %sh = (
-    ls           	=> `which lxc-ls`       ,
-    start        	=> `which lxc-start`    ,
-    stop         	=> `which lxc-stop`     ,
-    freeze       	=> `which lxc-freeze`   ,
-    unfreeze     	=> `which lxc-unfreeze` ,
-    create       	=> `which lxc-create`   ,
-    destroy      	=> `which lxc-destroy`  ,
-    cgroup       	=> `which lxc-cgroup`   ,
-    info         	=> `which lxc-info`     ,
-    attach       	=> `which lxc-attach`   ,
-    console      	=> `which lxc-console`  ,
-    ip           	=> `which ip`           ,
-    mount        	=> `which mount`        ,
-    umount       	=> `which umount`       ,
-    mkfs         	=> `which mkfs`         ,
-    tar          	=> `which tar`          ,
-    chow 		=> `which chown`        ,
+    ls              => `which lxc-ls`       ,
+    start           => `which lxc-start`    ,
+    stop            => `which lxc-stop`     ,
+    freeze          => `which lxc-freeze`   ,
+    unfreeze        => `which lxc-unfreeze` ,
+    create          => `which lxc-create`   ,
+    destroy         => `which lxc-destroy`  ,
+    cgroup          => `which lxc-cgroup`   ,
+    info            => `which lxc-info`     ,
+    attach          => `which lxc-attach`   ,
+    console         => `which lxc-console`  ,
+    ip              => `which ip`           ,
+    mount           => `which mount`        ,
+    umount          => `which umount`       ,
+    mkfsbtrfs       => `which mkfs.btrfs`   ,
+    tar             => `which tar`          ,
+    chow            => `which chown`        ,
 
-    lvs          	=> `which lvs`          ,
-    lvresize     	=> `which lvresize`     ,
-    lvcreate     	=> `which lvcreate`     ,
+    lvs             => `which lvs`          ,
+    lvresize        => `which lvresize`     ,
+    lvcreate        => `which lvcreate`     ,
 
-    btrfs        	=> `which btrfs`        ,
-    );
-for(@{[keys %sh]}){die "can`t find $_" if!defined($sh{$_});chomp($sh{$_});die "can`t find $sh{$_}" if!-f$sh{$_}};
+    nproc           => `which nproc`        ,
+    btrfs           => `which btrfs`        ,
+    file            => `which file`         ,
+);
+
+for ( @{[keys %sh]} ){ 
+  die "Can`t find $_\n" if ! defined($sh{$_});
+  chomp ( $sh{$_} );
+  die "Can`t find $sh{$_}\n" if ! -f $sh{$_}
+}
  
 ############################################################################################################
-my ($lxc_conf_file, $lxc_log_file, $vrfs, $crfs,@cache);
-my $opt = shift(@ARGV) or list_con();
-my $con = shift(@ARGV);
+my ( $lxc_conf_file, $lxc_log_file, $vrfs, $crfs, @cache );
+my $opt = shift( @ARGV ) or list_con();
+my $con = shift( @ARGV );
 my $id_con = 0;
-
-mkdir $lxc_root_dir if not -d $lxc_root_dir ; 
-mkdir $lxc_conf_dir if not -d $lxc_conf_dir ; 
-mkdir $lxc_temp_dir if not -d $lxc_temp_dir ;
-mkdir $lxc_log_dir  if not -d $lxc_log_dir ;
+for($lxc_root_dir,$lxc_conf_dir,$lxc_conf_dir,$lxc_log_dir){if(!-d$_){mkdir $_ or die "Can`t create dir $_\n"}}
 
 # check valid containers
 ############################################################################################################
-sub ccon($){
-  my $c=shift;
-  grep($_ eq $c,split(/\n/,`$sh{ls} $lxc_par --line`)) or die("can't find container $c\n");
-  $lxc_main_conf    .= '/' . $con . '/config';
-  open(my$rmf,"<$lxc_main_conf");while(<$rmf>){$id_con=$1 if /lxc\.include.+\/(\d+).+$/};close($rmf);
-  $lxc_conf_file	= $lxc_conf_dir . '/'. $id_con . '-' . $con . '.conf';
-  $lxc_log_file		= $lxc_log_dir . '/' . $con ;
-  $lxc_par             .= " --logfile=$lxc_log_file";
-  $crfs                 = $lxc_data_dir.'/'.$con.'/rootfs';
-  $vrfs                 = '/dev/'.$lvm_vg.'/'.$con;
-  die "error id container" if not $id_con;
-  die "can't find $lxc_conf_file" if not -f $lxc_conf_file;
+sub ccon($) {
+  die "Container name cannot be emptiness\n" if not defined $_[0];
+  grep ( $_ eq $_[0], split( /\n/ , `$sh{ls} $lxc_par --line` )) or die ( "Can't find container $_[0]\n" );
+  $lxc_main_conf .= '/' . $con . '/config';
+  open (my $rmf, '<', $lxc_main_conf);
+  while ( <$rmf> ){ $id_con = $1 if /lxc\.include.+\/(\d+).+$/ };
+  close ( $rmf );
+  $lxc_conf_file  = "$lxc_conf_dir/$id_con-$con.conf";
+  $lxc_log_file   = "$lxc_log_dir/$con" ;
+  $lxc_par       .= " --logfile=$lxc_log_file";
+  $crfs           = "$lxc_data_dir/$con/rootfs";
+  $vrfs           = "/dev/$lvm_vg/$con";
+  die 'Error id container' if not $id_con;
+  die "Can't find $lxc_conf_file" if not -f $lxc_conf_file;
+}
+
+# privilage convert
+############################################################################################################
+sub priv_convert {
+  my ( $directory, $serial_id, $to_root ) = @_;
+  opendir ( my $dir_shift, $directory );
+  while ( readdir( $dir_shift ) ){
+    my $full_file_name = $directory . '/' . $_;
+    if ( $_ ne '.' and $_ ne '..' ){
+      my ( $inode, $user_id, $group_id ) = ( lstat($full_file_name) )[ 1, 4, 5 ];
+      if ( not grep{$_==$inode}@cache ){
+        push ( @cache, $inode );
+        if ( $to_root ){
+          if ( $user_id < $serial_id or $group_id < $serial_id ){ die "Error unroot\n" }
+          $user_id -= $serial_id; $group_id -= $serial_id }
+        else { $user_id += $serial_id; $group_id += $serial_id }
+        my $mode = ${[lstat($full_file_name)]}[2] & 07777;
+        system ( qq($sh{chow} -h $user_id:$group_id '$full_file_name') );
+        chmod ( $mode, $full_file_name ) if ! -l $full_file_name;
+        priv_convert( $full_file_name, $serial_id, $to_root ) if ( -d $full_file_name and not -l $full_file_name );
+  }}}closedir( $dir_shift );
 }
 
 # size convert to bites
 ############################################################################################################
-sub csize($){my$val=shift;
-  if($val=~/^(\d+)([kmgt]?b?$)/i){my$int=$1;my$ci=$2;$ci||='m';
-    if($ci=~/k/i||$ci=~/kb/i){$int*=1024}
-    if($ci=~/m/i||$ci=~/mb/i){$int*=1024*1024}
-    if($ci=~/g/i||$ci=~/gb/i){$int*=1024*1024*1024}
-    if($ci=~/t/i||$ci=~/tb/i){$int*=1024*1024*1024*1024}
-    $int = 128*1024*1024 if $int < 128*1024*1024;
-    return $int
-  }else{die "error value - $val"}}
+sub csize($) {
+  my $val = shift;
+  if ( $val =~ /^(\d+)([kmgt]?b?$)/i ){ 
+    my $int = $1; 
+    my $ci = $2; 
+    if ( $ci =~ /k/i || $ci =~ /kb/i ){ $int*=1024 }
+    if ( $ci =~ /m/i || $ci =~ /mb/i ){ $int*=1024*1024 }
+    if ( $ci =~ /g/i || $ci =~ /gb/i ){ $int*=1024*1024*1024 }
+    if ( $ci =~ /t/i || $ci =~ /tb/i ){ $int*=1024*1024*1024*1024 }
+    return $int;
+  }
+  else { die "Error value - $val\n" }
+}
+
+# 
+############################################################################################################
+sub template {
+  opendir(my $dfd,$lxc_temp_dir);
+  print(join("\n",grep(`$sh{file} --uncompress --mime-type --brief "$lxc_temp_dir/$_"`=~/x-tar/,readdir($dfd))),"\n");
+  close($dfd);exit 0;
+}
 
 # main function
 ############################################################################################################
-sub list_con    {print(`$sh{ls} $lxc_par -f -F 'NAME,STATE,AUTOSTART,PID,RAM,SWAP,INTERFACE,IPV4'`);exit 0}
-sub start_con   {ccon($con);`$sh{start}    $lxc_par -n "$con"` ;print("start container $con done\n");exit 0}
-sub stop_con    {ccon($con);`$sh{stop}     $lxc_par -n "$con"` ;print("stop container $con done\n");exit 0}
-sub freeze_con  {ccon($con);`$sh{freeze}   $lxc_par -n "$con"` ;print("freeze container $con done\n");exit 0}
-sub unfreeze_con{ccon($con);`$sh{unfreeze} $lxc_par -n "$con"` ;print("unfreeze container $con done\n");exit 0}
-sub attach_con  {ccon($con);system(qq($sh{attach}   $lxc_par -n "$con"));print "\n";exit 0}
-sub console_con {ccon($con);system(qq($sh{console}  $lxc_par -n "$con"));print "\n";exit 0}
+sub list_con     {print(`$sh{ls} $lxc_par -f -F 'NAME,STATE,AUTOSTART,PID,RAM,SWAP,INTERFACE,IPV4'`);exit 0;}
+sub start_con    {ccon($con);`$sh{start} $lxc_par -n "$con"`;print("start container $con done\n");exit 0;}
+sub stop_con     {ccon($con);`$sh{stop} $lxc_par -n "$con"`;print("stop container $con done\n");exit 0;}
+sub freeze_con   {ccon($con);`$sh{freeze} $lxc_par -n "$con"`;print("freeze container $con done\n");exit 0;}
+sub unfreeze_con {ccon($con);`$sh{unfreeze} $lxc_par -n "$con"`;print( "unfreeze container $con done\n" );exit 0;}
+sub attach_con   {ccon($con);system(qq($sh{attach} $lxc_par -n "$con"));print "\n";exit 0;}
+sub console_con  {ccon($con);system(qq($sh{console} $lxc_par -n "$con"));print "\n";exit 0;}
 
-#exec in container
+# info container
 ############################################################################################################
-sub exec_con    {
+sub info_con  {
+  ccon( $con );
+  my ( @conf, $priv, $cpus, $mem, $sw);
+  print (`$sh{info} $lxc_par -n "$con"`);
+  open (my $rcf, '<', $lxc_conf_file);
+  while ( <$rcf> ){chomp;push(@conf, $_)};
+  close( $rcf );
+  $priv = grep(/^lxc.id_map/, @conf) ? 'no' : 'yes';
+
+  my $state = `$sh{info} $lxc_par -s -H -n $con`; chomp($state);
+  my $run = 'RUNNING' eq $state ? 1 : 0 ;
+  if ( $run ){
+    $mem=`$sh{cgroup} $lxc_par -n "$con" memory.limit_in_bytes`;
+    $sw=`$sh{cgroup} $lxc_par -n "$con" memory.memsw.limit_in_bytes`;
+    $cpus = `$sh{cgroup} $lxc_par -n "$con" cpuset.cpus`;
+    chomp($mem,$sw,$cpus);
+  }else{ for ( @conf ){
+    $mem  = ${[split(/\s*=\s*/)]}[1] if /lxc\.cgroup\.memory\.limit_in_bytes/;
+    $sw   = ${[split(/\s*=\s*/)]}[1] if /lxc\.cgroup\.memory\.memsw\.limit_in_bytes/;
+    $cpus = ${[split(/\s*=\s*/)]}[1] if /lxc\.cgroup\.cpuset\.cpus/;
+  }}
+  if($mem or $sw){
+    $sw=$sw<9223372036854771712?int(($sw-$mem)/(1024*1024)).' Mb':'no limit';
+    $mem=$mem<9223372036854771712?int($mem/(1024*1024)).' Mb':'no limit' ;
+  }
+  $mem ||= 'no limit';  $sw  ||= 'no limit';
+  $cpus = 'no limit' if !defined($cpus);
+  print(
+    "\n".
+    "Root volume:\t$vrfs\n".
+    "Config file:\t$lxc_conf_file\n".
+    "Privilagies:\t$priv\n".
+    "\n".
+    "Memory limit:\t$mem\n".
+    "Swap limit:\t$sw\n".
+    "Cpus used:\t$cpus\n"
+  );
+ exit 0;
+}
+
+# exec in container
+############################################################################################################
+sub exec_con  {
   ccon($con);
-  my $state =`$sh{info} $lxc_par -s -H -n $con`;chomp($state);
-  die 'container is not running' if 'RUNNING' ne $state;
-  my $com = join(" ",@ARGV);
+  my $state = `$sh{info} $lxc_par -s -H -n $con`;
+  chomp($state);
+  die 'Container is running' if 'RUNNING' ne $state;
+  my $com = join(' ',@ARGV);
   system(qq($sh{attach} $lxc_par -n $con -- /bin/sh -c "$com"));
   exit 0;
 }
 
 # destroy container
 ############################################################################################################
-sub dest_con    {
+sub dest_con {
   ccon($con);
-  my $state =`$sh{info} $lxc_par -s -H -n $con`;chomp($state);
-  die 'container is running' if 'RUNNING' eq $state;
+  my $state = `$sh{info} $lxc_par -s -H -n $con`;
+  chomp($state);
+  die 'Container is running' if 'RUNNING' eq $state;
   `$sh{destroy}  $lxc_par -n "$con"`;
   unlink $lxc_conf_file if -f $lxc_conf_file ;
-  print("destroy container $con done\n");
+  print("Destroy container $con done\n");
   exit 0;
 }
 
 # create container 
 ############################################################################################################
-sub create_con{
-  grep($_ eq $con,split(/\n/,`$sh{ls} $lxc_par --line`)) and die("error container $con exist\n");
-  opendir(my $dcf,$lxc_conf_dir); my @idc = map{/^(\d+)/;$_=$1}grep{/^\d+-/}readdir($dcf);close($dcf); 
-  for my $cid (1..999){$id_con=$cid if not grep{$_== $cid}@idc;last if $id_con}
-  $lxc_main_conf        .= '/' . $con . '/config';
-  $lxc_conf_file        = $lxc_conf_dir . '/' . $id_con . '-' . $con . '.conf'; 
-  $lxc_log_file	        = $lxc_log_dir  . '/' . $con ;
-  $crfs                 = $lxc_data_dir . '/' . $con . '/rootfs';
+sub create_con {
+  die "Container name cannot be emptiness\n" if not defined $con;
+  grep($_ eq $con,split(/\n/,`$sh{ls} $lxc_par --line`)) and die("Container $con exist\n");
+  my ( @conf, $template, $ar, @ai, $mem, $sw, $cpu, $ds, $priv );
+  GetOptions(
+    "h|help"            => \&usage,
+    "t|template=s"      => \$template,
+    "au|autorun"        => \$ar,
+    "p|priv"            => \$priv,
+    "ai|addif=s"        => \@ai,
+    "m|memory=s"        => \$mem,
+    "s|swap=s"          => \$sw,
+    "c|cpu=i"           => \$cpu,
+    "d|disk=s"          => \$ds
+  ); 
+  $template = $default_template if not defined $template;
+  $template = $lxc_temp_dir . '/' . $template;
+ 
+  die "Can not find template on $template\n" if `$sh{file} --uncompress --mime-type --brief $template` !~ /tar/;
 
-  my $sid = 100000;
+  opendir(my $dcf, $lxc_conf_dir);
+  my @idc = map{/^(\d+)/;$_=$1}grep{/^\d+-/}readdir($dcf);
+  close($dcf); 
+  for my $cid(1..999){$id_con=$cid if not grep{$_== $cid}@idc;last if $id_con};
 
-  $vrfs                 = '/dev/'.$lvm_vg.'/'.$con;
-  `mkdir -p $crfs`;
-  `$sh{lvcreate} $lvm_vg -n $con -L 1G`;
-  `$sh{mkfs}            -t btrfs $vrfs`;
-  `$sh{mount}              $vrfs $crfs`;
-
-#b  `mkdir -p  $lxc_data_dir/$con`;
-#b  `$sh{btrfs} subvolume create $crfs`;
-
-  open(my $wcf, ">$lxc_conf_file") or die "cann't open file $lxc_conf_file" ;
-  $wcf->print("lxc.start.auto = 1\n"
-             ."lxc.tty = 4\n"
-             ."lxc.utsname = $con\n"
-             ."lxc.arch = amd64\n"
-             ."lxc.network.type = empty\n"
-             ."lxc.rootfs = $vrfs\n"
-             ."lxc.rootfs.backend = lvm\n"
-#b             ."lxc.rootfs.backend = btrfs\n"
-             ."lxc.include = /usr/share/lxc/config/debian.common.conf\n");
-  close($wcf);
-  open(my $wof, ">$lxc_main_conf") or die "cann't open file $lxc_main_conf"; 
-  $wof->print("lxc.include = $lxc_conf_file\nlxc.id_map = u 0 $sid 65536\nlxc.id_map = g 0 $sid 65536");close $wof;
-  `$sh{tar} -xf $template -C $crfs`;
-
-  sub rec {
-    my($directory,$serial_id)=@_;
-    opendir(my $dir_shift,$directory);
-    while(readdir($dir_shift)){
-    my $full_file_name = $directory.'/'.$_;
-    if($_ ne '.' and $_ ne '..'){
-      my($inode,$user_id,$group_id)=(lstat($full_file_name))[1,4,5];
-      if(not grep{$_==$inode}@cache){
-        push(@cache,$inode);    
-	$user_id+=$serial_id;
-        $group_id+=$serial_id;
-        system(qq($sh{chow} -h $user_id:$group_id '$full_file_name'));
-        rec($full_file_name,$serial_id)if(-d $full_file_name and not -l $full_file_name );
-        }
-      }
-    }
-    closedir($dir_shift);
+  $lxc_main_conf .= '/' . $con . '/config';
+  $lxc_conf_file = "$lxc_conf_dir/$id_con-$con.conf"; 
+  $lxc_log_file  = "$lxc_log_dir/$con" ;
+  $crfs          = "$lxc_data_dir/$con/rootfs";
+  $vrfs          = "/dev/$lvm_vg/$con";
+  $ds = 0 if ! defined $ds; $ds=csize($ds); $ds = 1024*1024*1024 if $ds < 1024*1024*1024;
+  
+  push @conf, 'lxc.tty = 4';
+  push @conf, "lxc.utsname = $con";
+  push @conf, 'lxc.arch = amd64';
+  push @conf, 'lxc.network.type = empty';
+  push @conf, "lxc.rootfs = $vrfs";
+  push @conf, 'lxc.rootfs.backend = lvm';
+  push @conf, 'lxc.include = /usr/share/lxc/config/debian.common.conf';
+  push @conf, 'lxc.start.auto = 1' if ( ! defined $ar ); 
+  push @conf, "lxc.id_map = u 0 $unprivilage_id 65536" if defined $priv;
+  push @conf, "lxc.id_map = g 0 $unprivilage_id 65536" if defined $priv;
+  
+  if(defined $sw||defined $mem){
+    $mem = 0   if !defined $mem; $mem = csize($mem); $mem = 128*1024*1024 if $mem < 128*1024*1024;
+    $sw = $mem if !defined $sw; $sw=csize($sw)+$mem;
+    push @conf,"lxc.cgroup.memory.limit_in_bytes = $mem";
+    push @conf,"lxc.cgroup.memory.memsw.limit_in_bytes = $sw";
   }
-  rec($crfs,$sid);
 
-  open(my $wcrt,">$crfs/etc/hostname");
+  if(defined $cpu){
+    my $mxp = `$sh{nproc}`;chomp($mxp);
+    die "Error cpu count\n" if $cpu > $mxp or $cpu < 1;
+    my @vcp = (0..$mxp);
+    my $lst = '';my @fpr;$cpu--;$mxp--;
+    for(`$sh{ls} $lxc_par --line --active`){chomp;$lst .= `$sh{cgroup} $lxc_par -n $_ cpuset.cpus`}
+    for(split/\n/,$lst){if(/([0-9,-]+)/){for(split/,/,$1){if(/-/){my@k=split/-/;$vcp[$_]++for($k[0]..$k[1])}else{$vcp[$_]++}}}}
+    for my$c(0..$cpu){for my$m(0..$mxp){if(!scalar grep{$_ eq $m}@fpr){$fpr[$c]=$m if(!defined($fpr[$c])or$vcp[$m]<$vcp[$fpr[$c]])}}}
+    $cpu = join(',',@fpr);
+    push @conf,"lxc.cgroup.cpuset.cpus = $cpu";
+  }
+
+  for(@ai){
+    s/\D*//g; my $mac = sprintf "02:%02x:%02x:%02x:%02x:%02x", map(int(rand(256)),(1..5));
+    my $vint = $id_con.'_'.$_; my $vbr = 'br.'.$_; my $vvlan = 'v'.$_;
+    die "$vvlan exist in $con" if grep{/(####BEGIN-$vint####)|(###END-$vint###)/}@conf;
+    push @conf, "####BEGIN-$vint####",
+                "lxc.network.type = veth",
+                "lxc.network.flags = up",
+                "lxc.network.hwaddr = $mac",
+                "lxc.network.link = $vbr",
+                "lxc.network.name = $vvlan",
+                "lxc.network.veth.pair = $vint",
+                 "###END-$vint###";
+  }
+  die "Can`t create lvm partition, $vrfs exist.\n" if -e $vrfs;
+  open(my $wcf,'>',$lxc_conf_file) or die "Cann't open file $lxc_conf_file" ;$wcf->print(join("\n",@conf)."\n");close($wcf);
+  `mkdir -p $crfs`;  `$sh{lvcreate} --wipesignatures=n $lvm_vg -n $con -L ${ds}B`;
+  `$sh{mkfsbtrfs} --force $vrfs`;  `$sh{mount} $vrfs $crfs`;
+  `$sh{tar} -xf "$template" -C "$crfs"`;
+  open(my $wof,'>',$lxc_main_conf) or die "cann't open file $lxc_main_conf";$wof->print("lxc.include = $lxc_conf_file\n");close $wof;
+  priv_convert($crfs,$unprivilage_id,0) if defined $priv;
+  open(my $wcrt,'>',"$crfs/etc/hostname");
   $wcrt->print("$con");close($wcrt);
   `$sh{umount} $crfs`;
-  print("create container $con done\n"); 
+  print("Create container $con done\n"); 
   exit 0;
 }
 
 # settings start
 ############################################################################################################
 sub set_con {
-  ccon($con); my(@conf,$mem,$sw,$cpu,@ai,@di,$ds,$vpid,$ar);
+  ccon($con);
+  my(@conf,$mem, $sw,$omem,$osw,$cpu,@ai,@di,$ds,$vpid,$ar,$priv);
   GetOptions(
-    "h|help" 			=>\&usage,
-    "au|autorun=s"      =>\$ar,
-    "ai|addif=s"		=>\@ai,
-    "di|delif=s"		=>\@di,
-    "m|memory=s"		=>\$mem,
-    "s|swap=s"			=>\$sw,
-    "c|cpu=i"			=>\$cpu,
-    "d|disk=s"			=>\$ds    )or usage();
-  my $state =`$sh{info} $lxc_par -s -H -n $con`;chomp($state);
-  my $run = 'RUNNING' eq $state?1:0;
-  if($run){$vpid =`$sh{info} $lxc_par -p -H -n $con`;chomp($vpid)}
+    "h|help"            => \&usage,
+    "au|autorun=s"      => \$ar,
+    "ai|addif=s"        => \@ai,
+    "di|delif=s"        => \@di,
+    "m|memory=s"        => \$mem,
+    "s|swap=s"          => \$sw,
+    "c|cpu=i"           => \$cpu,
+    "d|disk=s"          => \$ds,
+    "p|priv=s"          => \$priv
+  ) or usage();
+  my $state =`$sh{info} $lxc_par -s -H -n $con`; chomp($state);
+  my $run = 'RUNNING' eq $state ? 1 : 0;
+  if($run){$vpid =`$sh{info} $lxc_par -p -H -n $con`; chomp($vpid)}
   my $wrconc = 0;
-  open(my$rcf,"<$lxc_conf_file");while(<$rcf>){chomp;push(@conf,$_)};close($rcf);
-  
+  open( my $rcf, '<', $lxc_conf_file); while(<$rcf>){chomp;push(@conf,$_)}; close($rcf);
+
   # memory and swap
   if(defined $sw||defined $mem){
+      $mem = 9223372036854771712 if defined $mem and $mem=~/^(false|off|no)$/i;
+      $sw = 9223372036854771712 if defined $sw and $sw=~/^(false|off|no)$/i;
     if(!defined $mem){
-      if($run){$mem=`$sh{cgroup} $lxc_par -n "$con" memory.limit_in_bytes`;chomp($mem)}
+      if($run){$mem=`$sh{cgroup} $lxc_par -n "$con" memory.limit_in_bytes`; chomp($mem)}
       else{for(@conf){$mem=${[split(/\s*=\s*/)]}[1] if /lxc\.cgroup\.memory\.limit_in_bytes/}}
+      $mem||=0;
     }
-    $mem=csize($mem);
+    $mem = csize($mem); 
+    $mem = 128*1024*1024 if $mem < 128*1024*1024;
     if(!defined $sw){
-      if($run){$sw=`$sh{cgroup} $lxc_par -n "$con" memory.memsw.limit_in_bytes`;chomp($sw)}
+      if($run){$sw=`$sh{cgroup} $lxc_par -n "$con" memory.memsw.limit_in_bytes`; chomp($sw)}
       else{for(@conf){$sw=${[split(/\s*=\s*/)]}[1] if /lxc\.cgroup\.memory\.memsw\.limit_in_bytes/}}
-      $sw=csize($sw)
-    }else{$sw=csize($sw)+$mem}
+      $sw ||= $mem;
+      $sw = csize($sw)
+    }else{$sw = csize($sw) + $mem}
     if($run){
         `$sh{cgroup} $lxc_par -n "$con" memory.limit_in_bytes "$mem"`;
         `$sh{cgroup} $lxc_par -n "$con" memory.memsw.limit_in_bytes "$sw"`;
     }
     @conf=grep{$_!~/(lxc\.cgroup\.memory\.memsw\.limit_in_bytes)|(lxc\.cgroup\.memory\.limit_in_bytes)/}@conf; 
-    push @conf,"lxc.cgroup.memory.limit_in_bytes = $mem";
-    push @conf,"lxc.cgroup.memory.memsw.limit_in_bytes = $sw";
+    push(@conf,"lxc.cgroup.memory.limit_in_bytes = $mem");
+    push(@conf,"lxc.cgroup.memory.memsw.limit_in_bytes = $sw");
     $wrconc = 1;
   }  
 
   # autorun
   if(defined $ar){
-    if($ar=~/^(true|1|on)$/i){$ar=1}elsif($ar=~/^(false|0|off)/i){$ar=0}else{die "error parametr - $ar"}
+    if($ar=~/^(true|1|on|yes)$/i){$ar=1}elsif($ar=~/^(false|0|off|no)/i){$ar=0}else{die "Error parametr - $ar\n"}
     @conf=grep{$_!~/lxc\.start\.auto/}@conf; 
     push @conf,"lxc.start.auto = $ar";
-    $wrconc=1;
+    $wrconc = 1;
   }
 
   # add network interface
   for(@ai){
     s/\D*//g;
     my $mac = sprintf "02:%02x:%02x:%02x:%02x:%02x", map(int(rand(256)),(1..5));
-    my $vint = $id_con.'_'.$_;
-    my $vbr = 'br.'.$_;
-    my $vvlan = 'v'.$_;
+    my $vint = $id_con . '_' . $_ ;
+    my $vbr = 'br.' . $_ ;
+    my $vvlan = 'v' . $_ ;
     die "$vvlan exist in $con" if grep{/(####BEGIN-$vint####)|(###END-$vint###)/}@conf;
     if($run){
       `$sh{ip} link add name $vint type veth peer name v$vint`;
@@ -250,7 +385,7 @@ sub set_con {
                 "lxc.network.link = $vbr",
                 "lxc.network.name = $vvlan",
                 "lxc.network.veth.pair = $vint",
-                 "###END-$vint###";
+                "###END-$vint###";
     $wrconc = 1;
   }
 
@@ -261,8 +396,8 @@ sub set_con {
     my $vint = $id_con.'_'.$_;
     if($run){`$sh{ip} link delete $vint`}
       for(0..$#conf){
-       $cache_a=$_   if $conf[$_] =~ /####BEGIN-$vint####/;
-       $cache_b=$_+1 if $conf[$_] =~ /###END-$vint###/;
+        $cache_a=$_   if $conf[$_] =~ /####BEGIN-$vint####/;
+        $cache_b=$_+1 if $conf[$_] =~ /###END-$vint###/;
       }
     splice(@conf,$cache_a,$cache_b-$cache_a)if defined $cache_a and defined $cache_b ;
     $wrconc = 1;
@@ -270,11 +405,7 @@ sub set_con {
 
   # disk size
   if(defined $ds){   
-
-#b    `$sh{btrfs} qgroup limit -e $ds $crfs`;
-#b    `$sh{btrfs} qgroup limit    $ds $crfs`;
-
-    $ds=csize($ds);	  
+    $ds=csize($ds);       
     my $ods = `$sh{lvs} $vrfs -o size --units b --rows`;
     $ods =~ s/\D*//g;
     if ($ods < $ds){
@@ -286,15 +417,12 @@ sub set_con {
       `$sh{btrfs} filesystem resize $ds $crfs && $sh{lvresize} $vrfs -L ${ds}B --force 2>/dev/null`;
       `$sh{umount} $crfs`;
     }
-
-    
-  };
+  }
   
-
   # cpu
   if(defined $cpu){
-    my $mxp = `nproc`;chomp($mxp);
-    die "error cpu count" if $cpu > $mxp or $cpu < 1;
+    my $mxp = `$sh{nproc}`;chomp($mxp);
+    die "Error cpu count\n" if $cpu > $mxp or $cpu < 1;
     my @vcp = (0..$mxp);
     my $lst = '';my @fpr;$cpu--;$mxp--;
     for(`$sh{ls} $lxc_par --line --active`){chomp;$lst .= `$sh{cgroup} $lxc_par -n $_ cpuset.cpus`}
@@ -304,19 +432,35 @@ sub set_con {
     if($run){ `$sh{cgroup}  $lxc_par -n $con cpuset.cpus "$cpu"` }
     @conf=grep{$_!~/lxc\.cgroup\.cpuset\.cpus/}@conf;
     push @conf,"lxc.cgroup.cpuset.cpus = $cpu";
-    $wrconc=1;
+    $wrconc = 1;
   }
- 
+
+  # convert 
+  if(defined $priv){
+    if($priv=~/^(true|1|on|yes)$/i){$priv=1}elsif($priv=~/^(false|0|off|no)/i){$priv=0}else{die "Error parametr - $priv\n"}
+    die "Container is running\n" if $run;
+    `$sh{mount} $vrfs $crfs`;
+    if($priv){
+      priv_convert($crfs, $unprivilage_id, $priv);
+      @conf=grep{$_!~/lxc\.id_map/}@conf;
+    }else{
+      priv_convert($crfs, $unprivilage_id, $priv);
+      push @conf,"lxc.id_map = u 0 $unprivilage_id 65536","lxc.id_map = g 0 $unprivilage_id 65536";
+    }
+    `$sh{umount} $crfs`;
+    $wrconc = 1;
+  }
+  
   # write config to file
   if($wrconc){
-    open(my $wcf, ">$lxc_conf_file") or die "cann't open file $lxc_conf_file" ;
+    open(my $wcf,'>',"$lxc_conf_file") or die "cann't open file $lxc_conf_file" ;
     $wcf->print(join("\n",@conf)); close($wcf);
   }
   exit 0;
 
 }
 # end setings
-
+############################################################################################################
 # manual
 ############################################################################################################
 sub usage {
@@ -325,8 +469,20 @@ sub usage {
   $0 command [container-name] [parametr] 
   command:
     list     - список контейнеров
+    template - список темплайтов
+    info     - информация контейнира
     create   - создать контейнер
-    destroy  - удалить контейнер
+    parametr:
+        -t  --template          - указать темплейт для установки
+        -au --autostart         - отключить автостарт
+        -p  --priv              - создать непревилигированный контейнер
+        -ai --addif             - добавить сетевой интерфейс
+        -m  --memory            - указать память 
+        -s  --swap              - указать свап
+        -c  --cpu               - указать кол-во процессоров
+        -d  --disk              - указать объем диска
+
+    deostroy - удалить контейнер
     start    - запустить контейнер
     stop     - остановить контейнер
     freeze   - заморозить контейнер
@@ -337,17 +493,21 @@ sub usage {
     set      - изменить настройки ограничений контейнера
       parametr:
         -au --autostart on|off  - вкл/выкл автостарт
+        -p  --priv      on|off  - конвертировать в превилигированный или обратно
         -ai --addif             - добавить сетевой интерфейс
         -di --delif             - удалить сетевой интерфейс
         -m  --memory            - указать память 
         -s  --swap              - указать свап
         -c  --cpu               - указать кол-во процессоров
         -d  --disk              - указать объем диска
-  \n));
+
+  Основные настройки прописываються в файле: $main_conf_file .
+  
+  ));
   exit 0;
 }
 
-# options parser
+# main options parser
 ############################################################################################################
 start_con()    if $opt eq "start";
 stop_con()     if $opt eq "stop";
@@ -359,7 +519,9 @@ dest_con()     if $opt eq "destroy";
 set_con()      if $opt eq "set";
 attach_con()   if $opt eq "attach";
 console_con()  if $opt eq "console";
+info_con()     if $opt eq "info";
 list_con()     if $opt eq "list";
+template()     if $opt eq "template";
 usage();
-exit 0;
 
+exit 0;
