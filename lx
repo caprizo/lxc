@@ -3,10 +3,11 @@
 use 5.016;
 use warnings;
 use Getopt::Long;
-use constant VERSION => 0.3;
 
 # parametrs
 ############################################################################################################
+
+my $VERSION = '0.3';
 
 my $lxc_root_dir     = '/lxc';
 my $lxc_data_dir     = '/var/lib/lxc';
@@ -461,20 +462,24 @@ sub set_con {
 }
 # end setings
 ############################################################################################################
+
+
 # manual
 ############################################################################################################
 sub usage {
-  printf(qq(
-  Version: %s
-  
-  usage:  
-  %s command [container-name] [parametr] 
-  command:
+  print(qq(
+  Version: $VERSION
+
+  Usage:  
+  $0 command [container-name] [parametr] 
+ 
+  Commands:
     list     - список контейнеров
     template - список темплайтов
     info     - информация контейнира
     create   - создать контейнер
-    parametr:
+  
+      Create parametrs:
         -t  --template          - указать темплейт для установки
         -au --autostart         - отключить автостарт
         -p  --priv              - создать непревилигированный контейнер
@@ -493,7 +498,8 @@ sub usage {
     attach   - присоедениться к контейнеру
     exec     - выполнить команду в контейнере
     set      - изменить настройки ограничений контейнера
-      parametr:
+
+      Set parametrs:
         -au --autostart on|off  - вкл/выкл автостарт
         -p  --priv      on|off  - конвертировать в превилигированный или обратно
         -ai --addif             - добавить сетевой интерфейс
@@ -503,8 +509,8 @@ sub usage {
         -c  --cpu               - указать кол-во процессоров
         -d  --disk              - указать объем диска
 
-  Основные настройки прописываються в файле: %s.
-  \n),VERSION,$0,$main_conf_file);
+  Основные настройки прописываються в файле: $main_conf_file.
+  \n));
   exit 0;
 }
 

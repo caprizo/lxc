@@ -2,15 +2,17 @@
 
 ```
   Version: 0.3
-  
-  usage:  
+
+  Usage:  
   lx command [container-name] [parametr] 
-  command:
+ 
+  Commands:
     list     - список контейнеров
     template - список темплайтов
     info     - информация контейнира
     create   - создать контейнер
-    parametr:
+  
+      Create parametrs:
         -t  --template          - указать темплейт для установки
         -au --autostart         - отключить автостарт
         -p  --priv              - создать непревилигированный контейнер
@@ -29,7 +31,8 @@
     attach   - присоедениться к контейнеру
     exec     - выполнить команду в контейнере
     set      - изменить настройки ограничений контейнера
-      parametr:
+
+      Set parametrs:
         -au --autostart on|off  - вкл/выкл автостарт
         -p  --priv      on|off  - конвертировать в превилигированный или обратно
         -ai --addif             - добавить сетевой интерфейс
