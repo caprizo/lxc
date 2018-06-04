@@ -4,11 +4,9 @@ use 5.016;
 use warnings;
 use Getopt::Long;
 
+my $VERSION = '0.3';
 # parametrs
 ############################################################################################################
-
-my $VERSION = '0.3';
-
 my $lxc_root_dir     = '/lxc';
 my $lxc_data_dir     = '/var/lib/lxc';
 my $lxc_main_conf    = $lxc_data_dir;
@@ -21,8 +19,6 @@ my $unprivilage_id   = 100000;
 
 my $default_template = 'deb9.tgz';
 my $lvm_vg           = 'lxc';
-
-
 
 if(open(my $fhr_main_conf , '<', $main_conf_file)){
   while(<$fhr_main_conf>){if(!/^\s*#/){
