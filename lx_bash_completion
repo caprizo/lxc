@@ -15,12 +15,12 @@ if [[ ${COMP_WORDS[1]} != 'list' && ${COMP_WORDS[1]} != 'create' && ${COMP_CWORD
   return 0
 fi
 
-if [[ ${COMP_WORDS[1]} != 'set' && ${COMP_CWORD} -ge 3 ]];then
+if [[ ${COMP_WORDS[1]} == 'set' && ${COMP_CWORD} -ge 3 ]];then
   COMPREPLY=($(compgen -W '--autostart --priv --addif --delif --memory --swap --cpu --disk' -- $check))
   return 0
 fi
 
-if [[ ${COMP_WORDS[1]} != 'create' && ${COMP_CWORD} -ge 3 ]];then
+if [[ ${COMP_WORDS[1]} == 'create' && ${COMP_CWORD} -ge 3 ]];then
   COMPREPLY=($(compgen -W '--autostart --template --priv --addif --memory --swap --cpu --disk' -- $check))
   return 0
 fi
