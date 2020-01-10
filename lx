@@ -4,7 +4,7 @@ use 5.016;
 use warnings;
 use Getopt::Long;
 
-my $VERSION = '0.3';
+my $VERSION = '0.4';
 # parametrs
 ############################################################################################################
 my $lxc_root_dir     = '/lxc';
@@ -17,7 +17,7 @@ my $main_conf_file   = $lxc_conf_dir . '/lx.conf';
 my $lxc_par          = '--lxcpath='  . $lxc_data_dir;
 my $unprivilage_id   = 100000;
 
-my $default_template = 'deb9.tgz';
+my $default_template = 'deb10.txz';
 my $lvm_vg           = 'lxc';
 
 if(open(my $fhr_main_conf , '<', $main_conf_file)){
@@ -143,7 +143,7 @@ sub start_con    {ccon($con);`$sh{start} $lxc_par -n "$con"`;print("start contai
 sub stop_con     {ccon($con);`$sh{stop} $lxc_par -n "$con"`;print("stop container $con done\n");exit 0;}
 sub freeze_con   {ccon($con);`$sh{freeze} $lxc_par -n "$con"`;print("freeze container $con done\n");exit 0;}
 sub unfreeze_con {ccon($con);`$sh{unfreeze} $lxc_par -n "$con"`;print( "unfreeze container $con done\n" );exit 0;}
-sub attach_con   {ccon($con);system(qq($sh{attach} $lxc_par -n "$con"));print "\n";exit 0;}
+sub attach_con   {ccon($con);system(qq($sh{attach} $lxc_par  -n "$con" --clear-env -- su - root));print "\n";exit 0;}
 sub console_con  {ccon($con);system(qq($sh{console} $lxc_par -n "$con"));print "\n";exit 0;}
 
 # info container
@@ -247,16 +247,14 @@ sub create_con {
   $vrfs          = "/dev/$lvm_vg/$con";
   $ds = 0 if ! defined $ds; $ds=csize($ds); $ds = 1024*1024*1024 if $ds < 1024*1024*1024;
   
-  push @conf, 'lxc.tty = 4';
-  push @conf, "lxc.utsname = $con";
+  push @conf, 'lxc.tty.max = 4';
+  push @conf, "lxc.uts.name = $con";
   push @conf, 'lxc.arch = amd64';
-  push @conf, 'lxc.network.type = empty';
-  push @conf, "lxc.rootfs = $vrfs";
-  push @conf, 'lxc.rootfs.backend = lvm';
-  push @conf, 'lxc.include = /usr/share/lxc/config/debian.common.conf';
+  push @conf, "lxc.rootfs.path = $vrfs";
+  push @conf, 'lxc.include = /usr/share/lxc/config/common.conf';
   push @conf, 'lxc.start.auto = 1' if ( ! defined $ar ); 
-  push @conf, "lxc.id_map = u 0 $unprivilage_id 65536" if defined $priv;
-  push @conf, "lxc.id_map = g 0 $unprivilage_id 65536" if defined $priv;
+  push @conf, "lxc.idmap = u 0 $unprivilage_id 65536" if defined $priv;
+  push @conf, "lxc.idmap = g 0 $unprivilage_id 65536" if defined $priv;
   
   if(defined $sw||defined $mem){
     $mem = 0   if !defined $mem; $mem = csize($mem); $mem = 128*1024*1024 if $mem < 128*1024*1024;
@@ -277,18 +275,19 @@ sub create_con {
     push @conf,"lxc.cgroup.cpuset.cpus = $cpu";
   }
 
-  for(@ai){
-    s/\D*//g; my $mac = sprintf "02:%02x:%02x:%02x:%02x:%02x", map(int(rand(256)),(1..5));
-    my $vint = $id_con.'_'.$_; my $vbr = 'br.'.$_; my $vvlan = 'v'.$_;
-    die "$vvlan exist in $con" if grep{/(####BEGIN-$vint####)|(###END-$vint###)/}@conf;
-    push @conf, "####BEGIN-$vint####",
-                "lxc.network.type = veth",
-                "lxc.network.flags = up",
-                "lxc.network.hwaddr = $mac",
-                "lxc.network.link = $vbr",
-                "lxc.network.name = $vvlan",
-                "lxc.network.veth.pair = $vint",
-                 "###END-$vint###";
+  for my $int_id (@ai){
+    $int_id =~ s/\D*//g;
+    my $mac = sprintf "02:%02x:%02x:%02x:%02x:%02x", map(int(rand(256)),(1..5));
+    my $vint = $id_con . '_' . $int_id;
+    my $vbr = 'br.' . $int_id;
+    my $vvlan = 'v' . $int_id;
+    die "$vvlan exist in $con" if grep{/$int_id.*$vvlan/}@conf;
+    push @conf, "lxc.net.$int_id.type = veth",
+                "lxc.net.$int_id.flags = up",
+                "lxc.net.$int_id.hwaddr = $mac",
+                "lxc.net.$int_id.link = $vbr",
+                "lxc.net.$int_id.name = $vvlan",
+                "lxc.net.$int_id.veth.pair = $vint",
   }
   die "Can`t create lvm partition, $vrfs exist.\n" if -e $vrfs;
   open(my $wcf,'>',$lxc_conf_file) or die "Cann't open file $lxc_conf_file" ;$wcf->print(join("\n",@conf)."\n");close($wcf);
@@ -362,41 +361,34 @@ sub set_con {
   }
 
   # add network interface
-  for(@ai){
-    s/\D*//g;
+  for my $int_id (@ai){
+    $int_id =~ s/\D*//g;
     my $mac = sprintf "02:%02x:%02x:%02x:%02x:%02x", map(int(rand(256)),(1..5));
-    my $vint = $id_con . '_' . $_ ;
-    my $vbr = 'br.' . $_ ;
-    my $vvlan = 'v' . $_ ;
-    die "$vvlan exist in $con" if grep{/(####BEGIN-$vint####)|(###END-$vint###)/}@conf;
+    my $vint = $id_con . '_' . $int_id ;
+    my $vbr = 'br.' . $int_id ;
+    my $vvlan = 'v' . $int_id ;
+    die "$vvlan exist in $con" if grep{/$int_id.*$vvlan/}@conf;
     if($run){
       `$sh{ip} link add name $vint type veth peer name v$vint`;
       `$sh{ip} link set $vint master $vbr`;
       `$sh{ip} link set $vint up`;
       `$sh{ip} link set v$vint netns $vpid name $vvlan address $mac`;
     }
-    push @conf, "####BEGIN-$vint####",
-                "lxc.network.type = veth",
-                "lxc.network.flags = up",
-                "lxc.network.hwaddr = $mac",
-                "lxc.network.link = $vbr",
-                "lxc.network.name = $vvlan",
-                "lxc.network.veth.pair = $vint",
-                "###END-$vint###";
+    push @conf, "lxc.net.$int_id.type = veth",
+                "lxc.net.$int_id.flags = up",
+                "lxc.net.$int_id.hwaddr = $mac",
+                "lxc.net.$int_id.link = $vbr",
+                "lxc.net.$int_id.name = $vvlan",
+                "lxc.net.$int_id.veth.pair = $vint";
     $wrconc = 1;
   }
 
   # delete network interface
-  for(@di){
-    s/\D*//g;
-    my ($cache_a,$cache_b);
-    my $vint = $id_con.'_'.$_;
+  for my $int_id (@di){
+    $int_id =~ s/\D*//g;
+    my $vint = $id_con.'_'.$int_id;
     if($run){`$sh{ip} link delete $vint`}
-      for(0..$#conf){
-        $cache_a=$_   if $conf[$_] =~ /####BEGIN-$vint####/;
-        $cache_b=$_+1 if $conf[$_] =~ /###END-$vint###/;
-      }
-    splice(@conf,$cache_a,$cache_b-$cache_a)if defined $cache_a and defined $cache_b ;
+    @conf=grep{!/lxc\.net\.$int_id/}@conf;
     $wrconc = 1;
   }
 
@@ -485,7 +477,7 @@ sub usage {
         -c  --cpu               - указать кол-во процессоров
         -d  --disk              - указать объем диска
 
-    destroy - удалить контейнер
+    destroy  - удалить контейнер
     start    - запустить контейнер
     stop     - остановить контейнер
     freeze   - заморозить контейнер
