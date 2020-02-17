@@ -143,7 +143,7 @@ sub start_con    {ccon($con);`$sh{start} $lxc_par -n "$con"`;print("start contai
 sub stop_con     {ccon($con);`$sh{stop} $lxc_par -n "$con"`;print("stop container $con done\n");exit 0;}
 sub freeze_con   {ccon($con);`$sh{freeze} $lxc_par -n "$con"`;print("freeze container $con done\n");exit 0;}
 sub unfreeze_con {ccon($con);`$sh{unfreeze} $lxc_par -n "$con"`;print( "unfreeze container $con done\n" );exit 0;}
-sub attach_con   {ccon($con);system(qq($sh{attach} $lxc_par  -n "$con" --clear-env -- su - root));print "\n";exit 0;}
+sub attach_con   {ccon($con);system(qq($sh{attach} $lxc_par  -n "$con" --clear-env -- su -l - root));print "\n";exit 0;}
 sub console_con  {ccon($con);system(qq($sh{console} $lxc_par -n "$con"));print "\n";exit 0;}
 
 # info container
@@ -250,8 +250,10 @@ sub create_con {
   push @conf, 'lxc.tty.max = 4';
   push @conf, "lxc.uts.name = $con";
   push @conf, 'lxc.arch = amd64';
+  push @conf, 'lxc.group = onboot';
+  push @conf, 'lxc.apparmor.profile = unconfined';
   push @conf, "lxc.rootfs.path = $vrfs";
-  push @conf, 'lxc.include = /usr/share/lxc/config/common.conf';
+  push @conf, 'lxc.include = /usr/share/lxc/config/debian.common.conf';
   push @conf, 'lxc.start.auto = 1' if ( ! defined $ar ); 
   push @conf, "lxc.idmap = u 0 $unprivilage_id 65536" if defined $priv;
   push @conf, "lxc.idmap = g 0 $unprivilage_id 65536" if defined $priv;
@@ -469,7 +471,7 @@ sub usage {
   
       Create parametrs:
         -t  --template          - указать темплейт для установки
-        -au --autostart         - отключить автостарт
+        -au --autorun           - отключить автостарт
         -p  --priv              - создать непревилигированный контейнер
         -ai --addif             - добавить сетевой интерфейс
         -m  --memory            - указать память 
